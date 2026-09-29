@@ -1899,7 +1899,7 @@ def _build_server(graph_path: str):
             ),
             types.Tool(
                 name="get_node",
-                description="Get full details for a specific node by label or ID.",
+                description="Get full details for a node by exact label or ID. Returns exact-match candidates when ambiguous; does not guess fuzzy matches.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -2065,11 +2065,24 @@ def _build_server(graph_path: str):
     def _tool_get_node(arguments: dict) -> str:
         raw = _node_arg(arguments)
         if not raw:
-            return "Provide a node label or id (accepted keys: label, node_id, id)."
+            return json.dumps({"error": "no exact match found"})
         label = raw.lower()
-        nid, err = _resolve_single_node(G, label)
-        if err:
-            return err
+        source_exact, exact, _prefix, _substring = _find_node_tiers(G, label)
+        matches = source_exact or exact
+        if not matches:
+            return json.dumps({"error": "no exact match found"})
+        if len(matches) > 1:
+            candidates = []
+            for candidate_id in matches:
+                candidate = G.nodes[candidate_id]
+                location = str(candidate.get("source_location") or "")
+                line_match = re.search(r"\d+", location)
+                candidates.append({
+                    "path": str(candidate.get("source_file") or ""),
+                    "line": int(line_match.group()) if line_match else None,
+                })
+            return json.dumps(candidates, ensure_ascii=False)
+        nid = matches[0]
         d = G.nodes[nid]
         attrs = d.get("attributes")
         attrs_line = []
@@ -2184,8 +2197,8 @@ def _build_server(graph_path: str):
     def _tool_list_prs(arguments: dict) -> str:
         from graphify.prs import fetch_prs, fetch_worktrees, format_prs_text, _detect_default_branch
         repo = arguments.get("repo") or None
-        base = arguments.get("base") or _detect_default_branch(repo)
         try:
+            base = arguments.get("base") or _detect_default_branch(repo)
             prs = fetch_prs(repo=repo, base=base)
         except RuntimeError as e:
             raise ToolError(f"Error: {e}") from e
