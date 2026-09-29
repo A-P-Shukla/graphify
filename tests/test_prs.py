@@ -392,21 +392,41 @@ class TestDetectDefaultBranch:
     def test_explicit_repo_gh_fails_returns_main_without_local_git(self):
         """When an explicit repo is supplied and gh fails, return 'main' without
         inspecting the local repository (#3318)."""
-        with patch("graphify.prs.os.path.exists", return_value=False), \
-             patch("graphify.prs._gh", return_value=None), \
+        with patch("graphify.prs._gh", return_value=None), \
              patch("graphify.prs.subprocess.run") as mock_git:
             branch = _detect_default_branch(repo="owner/repo")
         assert branch == "main"
         mock_git.assert_not_called()
 
-    def test_missing_local_repo_fails_before_gh(self):
-        with patch("graphify.prs.os.path.exists", return_value=False), \
-             patch("graphify.prs._gh") as mock_gh:
+    def test_missing_local_repo_fails_before_gh(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with patch("graphify.prs._gh") as mock_gh:
             with pytest.raises(RuntimeError, match="could not detect repository; pass repo="):
                 _detect_default_branch()
             with pytest.raises(RuntimeError, match="could not detect repository; pass repo="):
                 fetch_prs(base="main")
         mock_gh.assert_not_called()
+
+    def test_nested_repo_directory_is_detected(self, tmp_path, monkeypatch):
+        nested = tmp_path / "repo" / "src" / "package"
+        (tmp_path / "repo" / ".git").mkdir(parents=True)
+        nested.mkdir(parents=True)
+        monkeypatch.chdir(nested)
+        with patch(
+            "graphify.prs._gh",
+            return_value={"defaultBranchRef": {"name": "main"}},
+        ) as mock_gh:
+            assert _detect_default_branch() == "main"
+        mock_gh.assert_called_once()
+
+    def test_explicit_repo_skips_local_repository_check(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with patch(
+            "graphify.prs._gh",
+            return_value={"defaultBranchRef": {"name": "main"}},
+        ) as mock_gh:
+            assert _detect_default_branch(repo="owner/repo") == "main"
+        mock_gh.assert_called_once()
 
 
 # ── build_community_labels ─────────────────────────────────────────────────────

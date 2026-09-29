@@ -184,8 +184,16 @@ def _detect_default_branch(repo: str | None = None) -> str:
 
 
 def _require_repo_context(repo: str | None) -> None:
-    if repo is None and not os.path.exists(".git"):
-        raise RuntimeError("could not detect repository; pass repo=")
+    if repo is not None:
+        return
+    directory = Path.cwd()
+    while True:
+        if (directory / ".git").exists():
+            return
+        parent = directory.parent
+        if parent == directory:
+            raise RuntimeError("could not detect repository; pass repo=")
+        directory = parent
 
 
 _CI_FAILURE_CONCLUSIONS = frozenset({"FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"})
