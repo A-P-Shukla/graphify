@@ -1638,13 +1638,14 @@ def find_node_ambiguity(G: nx.Graph, label: str) -> list[str]:
 def _resolve_single_node(G: nx.Graph, label: str) -> tuple[str | None, str | None]:
     """Shared node resolution for the get_node / get_neighbors tools.
 
-    Returns ``(node_id, None)`` when *label* resolves to a single winner via the
-    tiered `_find_node` ranking, or ``(None, message)`` when there is no match or
-    the winning tier spans several source files. Routing both tools through this
-    keeps get_node from silently returning a `G.nodes()` iteration-order match for
-    a hub name while get_neighbors reports the same lookup as ambiguous (#ADR-0001).
+    Returns ``(node_id, None)`` only for an exact source-file, label, or ID match,
+    or ``(None, message)`` when there is no exact match or the winning exact tier
+    spans several source files. ``find_node_ambiguity`` preserves same-file
+    precedence for a file node and one of its members. Routing both tools through
+    this keeps fuzzy lookup from silently choosing an arbitrary node (#ADR-0001).
     """
-    matches = _find_node(G, label)
+    source_exact, exact, _prefix, _substring = _find_node_tiers(G, label)
+    matches = source_exact or exact
     if not matches:
         return None, f"No node matching '{label}' found."
     rivals = find_node_ambiguity(G, label)
@@ -1899,7 +1900,7 @@ def _build_server(graph_path: str):
             ),
             types.Tool(
                 name="get_node",
-                description="Get full details for a node by exact label or ID. Returns exact-match candidates when ambiguous; does not guess fuzzy matches.",
+                description="Get full details for a node by exact label or ID. Reports ambiguity or misses as text; does not guess fuzzy matches.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -2064,25 +2065,10 @@ def _build_server(graph_path: str):
 
     def _tool_get_node(arguments: dict) -> str:
         raw = _node_arg(arguments)
-        if not raw:
-            return json.dumps({"error": "no exact match found"})
         label = raw.lower()
-        source_exact, exact, _prefix, _substring = _find_node_tiers(G, label)
-        matches = source_exact or exact
-        if not matches:
-            return json.dumps({"error": "no exact match found"})
-        if len(matches) > 1:
-            candidates = []
-            for candidate_id in matches:
-                candidate = G.nodes[candidate_id]
-                location = str(candidate.get("source_location") or "")
-                line_match = re.search(r"\d+", location)
-                candidates.append({
-                    "path": str(candidate.get("source_file") or ""),
-                    "line": int(line_match.group()) if line_match else None,
-                })
-            return json.dumps(candidates, ensure_ascii=False)
-        nid = matches[0]
+        nid, err = _resolve_single_node(G, label)
+        if err:
+            return err
         d = G.nodes[nid]
         attrs = d.get("attributes")
         attrs_line = []

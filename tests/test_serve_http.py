@@ -443,14 +443,12 @@ def test_get_node_and_get_neighbors_agree_on_ambiguous_label(tmp_path):
         headers = _init_session(client)
         node = _call_tool(client, headers, "get_node", {"label": "extract"}, rid=2)
         neighbors = _call_tool(client, headers, "get_neighbors", {"label": "extract"}, rid=3)
-        assert json.loads(node) == [
-            {"path": "a/x.py", "line": 427},
-            {"path": "b/y.py", "line": 19},
-        ]
-        assert neighbors.startswith("Ambiguous:"), neighbors
+        assert node == neighbors
+        assert node.startswith("Ambiguous: 'extract' matches 2 nodes"), node
+        assert "Retry with path::symbol" in node
         # A unique label still resolves cleanly on get_node.
         unique = _call_tool(client, headers, "get_node", {"label": "unique_helper"}, rid=4)
         assert "Node: unique_helper" in unique, unique
         # Prefix matches must not silently resolve to an arbitrary node.
         missing = _call_tool(client, headers, "get_node", {"label": "extr"}, rid=5)
-        assert json.loads(missing) == {"error": "no exact match found"}
+        assert missing == "No node matching 'extr' found."
